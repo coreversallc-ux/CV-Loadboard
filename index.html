@@ -1,19 +1,436 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Core Versa Loadboard</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Core Versa Loadboard — First Class</title>
+
+  <meta name="description" content="Professional loadboard: dispatch, negotiate, assign. Admin‑only load creation. Driver availability posts." />
+  <meta name="theme-color" content="#0ea5e9" />
+
+  <!-- Fonts & Tailwind -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
   <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
-  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+  <style>
+    :root { color-scheme: dark; }
+    html, body, #root { height: 100%; }
+    body { margin:0; font-family:'Inter', system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; background:#0b0b0b; }
+    .brand-gradient { background: linear-gradient(90deg,#0ea5e9 0%,#22d3ee 100%); -webkit-background-clip:text; background-clip:text; color:transparent; }
+    .card { border-radius: 1rem; border: 1px solid rgba(255,255,255,0.08); background: rgba(255,255,255,0.02); }
+    .btn { border-radius: .75rem; font-weight: 600; padding:.5rem .9rem; }
+    .btn-primary { background:#16a34a; }
+    .btn-primary:hover { background:#22c55e; }
+    .btn-sky { background:#0284c7; }
+    .btn-sky:hover { background:#0ea5e9; }
+    .btn-ghost { background: rgba(255,255,255,0.06); }
+    .btn-ghost:hover { background: rgba(255,255,255,0.12); }
+    .input, select, textarea { background:#0f0f0f; border:1px solid rgba(255,255,255,0.12); border-radius:.75rem; padding:.5rem .75rem; outline:none; }
+    .input:focus, select:focus, textarea:focus { box-shadow: 0 0 0 2px rgba(34,197,94,.35); border-color: rgba(34,197,94,.5); }
+    .pill { font-size:.75rem; padding:.25rem .5rem; border-radius:999px; border:1px solid rgba(255,255,255,0.12); background:rgba(255,255,255,0.05); }
+    .k { color:#60a5fa; } .v { color:#fbbf24; } .n { color:#34d399; }
+  </style>
+
+  <!-- React 18 UMD + Babel for inline JSX -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 </head>
-<body class="bg-neutral-950 text-white">
-  <div id="root"></div>
+<body>
+  <div id="root" class="min-h-full"></div>
+
   <script type="text/babel">
-    // Insert the React app code here
-    {react_code}
+    const { useState, useEffect, useMemo } = React;
+
+    // LS KEYS
+    const LS = {
+      LOADS: "cv_loads_v1",
+      DRIVER_POSTS: "cv_driver_posts_v1",
+      DRIVER_ACCESS: "cv_driver_access_v1",
+      ADMIN: "cv_admin_v1" // { passcode: "...", authed: false }
+    };
+
+    // Helpers
+    const uid = () => Math.random().toString(36).slice(2, 10).toUpperCase();
+    const nowISO = () => new Date().toISOString();
+
+    const loadJSON = (key, fallback) => {
+      try {
+        const raw = localStorage.getItem(key);
+        if (!raw) return fallback;
+        const parsed = JSON.parse(raw);
+        return parsed ?? fallback;
+      } catch { return fallback; }
+    };
+    const saveJSON = (key, val) => localStorage.setItem(key, JSON.stringify(val));
+
+    // Models
+    function useLoads() {
+      const [loads, setLoads] = useState(() => loadJSON(LS.LOADS, []));
+      useEffect(() => saveJSON(LS.LOADS, loads), [loads]);
+      return [loads, setLoads];
+    }
+
+    function useDriverPosts() {
+      const [posts, setPosts] = useState(() => loadJSON(LS.DRIVER_POSTS, []));
+      useEffect(() => saveJSON(LS.DRIVER_POSTS, posts), [posts]);
+      return [posts, setPosts];
+    }
+
+    function useDriverAccess() {
+      const [access, setAccess] = useState(() => loadJSON(LS.DRIVER_ACCESS, {}));
+      useEffect(() => saveJSON(LS.DRIVER_ACCESS, access), [access]);
+      return [access, setAccess];
+    }
+
+    function useAdmin() {
+      const [admin, setAdmin] = useState(() => loadJSON(LS.ADMIN, { passcode: "", authed: false }));
+      useEffect(() => saveJSON(LS.ADMIN, admin), [admin]);
+      return [admin, setAdmin];
+    }
+
+    // Components
+    const SectionTitle = ({ title, subtitle }) => (
+      <div className="mb-3">
+        <h3 className="text-lg font-semibold">{title}</h3>
+        {subtitle && <div className="text-sm text-white/60">{subtitle}</div>}
+      </div>
+    );
+
+    const TextField = ({ label, value, onChange, placeholder, required, type="text" }) => (
+      <label className="text-sm">
+        <div className="mb-1 text-white/70">{label}</div>
+        <input className="w-full input" value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder} required={required} type={type} />
+      </label>
+    );
+
+    const SelectField = ({ label, value, onChange, options }) => (
+      <label className="text-sm">
+        <div className="mb-1 text-white/70">{label}</div>
+        <select className="w-full input" value={value} onChange={e=>onChange(e.target.value)}>
+          {options.map(o => <option key={o} value={o}>{o}</option>)}
+        </select>
+      </label>
+    );
+
+    // Driver Availability (post + board)
+    function DriverAvailabilityForm({ onPost }) {
+      const [name, setName] = useState("");
+      const [location, setLocation] = useState("");
+      const [availability, setAvailability] = useState("");
+      const [equipment, setEquipment] = useState("Sprinter");
+      const [phone, setPhone] = useState("");
+
+      return (
+        <form onSubmit={(e)=>{e.preventDefault(); if(!name||!location||!phone) return;
+          onPost({ id: uid(), name:name.trim(), location:location.trim(), availability:availability.trim()||"Available now", equipment, phone:phone.trim(), createdAt: nowISO() });
+          setName(""); setLocation(""); setAvailability(""); setEquipment("Sprinter"); setPhone("");
+        }} className="card p-4">
+          <div className="grid gap-3 md:grid-cols-2">
+            <TextField label="Your Name" value={name} onChange={setName} placeholder="Jane Driver" required />
+            <TextField label="Phone" value={phone} onChange={setPhone} placeholder="(555) 555‑1234" required />
+            <TextField label="Current Location" value={location} onChange={setLocation} placeholder="City, ST" required />
+            <SelectField label="Equipment" value={equipment} onChange={setEquipment} options={["Cargo Van","Sprinter","16' Box","26' Box","Semi"]} />
+            <TextField label="Availability" value={availability} onChange={setAvailability} placeholder="Available now / 9am‑5pm / Tomorrow" />
+          </div>
+          <div className="mt-4">
+            <button className="btn btn-primary">Post Availability</button>
+          </div>
+        </form>
+      );
+    }
+
+    function DriverBoard({ posts, access, onToggleAccess }) {
+      if (!posts.length) return <div className="card p-4 text-sm text-white/60">No driver posts yet.</div>;
+      return (
+        <div className="card">
+          <div className="divide-y divide-white/5">
+            {posts.map(p => {
+              const enabled = access[p.phone] !== false;
+              return (
+                <div key={p.id} className={"p-4 " + (enabled ? "" : "opacity-60")}>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="font-semibold">{p.name} • {p.equipment}</div>
+                    <div className="text-xs text-white/60">{new Date(p.createdAt).toLocaleString()}</div>
+                  </div>
+                  <div className="mt-1 text-sm text-white/80">{p.location} • {p.availability}</div>
+                  <div className="mt-2 flex items-center gap-3 text-sm">
+                    <a href={`tel:${p.phone}`} className="btn btn-ghost">{p.phone}</a>
+                    <button className={"btn " + (enabled ? "btn-sky" : "btn-ghost")} onClick={()=>onToggleAccess(p.phone)}>
+                      {enabled ? "Disable Profile" : "Enable Profile"}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      );
+    }
+
+    // Loads & Offers
+    function CreateLoadForm({ onCreate }) {
+      const [title, setTitle] = useState("");
+      const [origin, setOrigin] = useState("");
+      const [destination, setDestination] = useState("");
+      const [miles, setMiles] = useState("");
+      const [weight, setWeight] = useState("");
+      const [rate, setRate] = useState("");
+
+      return (
+        <form onSubmit={(e)=>{e.preventDefault();
+          if(!title||!origin||!destination) return;
+          onCreate({ id: uid(), title, origin, destination, miles: +miles || 0, weight: +weight || 0, rate: +rate || 0, status: "open", offers: [], assignedDriver: null, createdAt: nowISO() });
+          setTitle(""); setOrigin(""); setDestination(""); setMiles(""); setWeight(""); setRate("");
+        }} className="card p-4">
+          <div className="grid gap-3 md:grid-cols-2">
+            <TextField label="Title" value={title} onChange={setTitle} placeholder="Union City, GA → Denver, PA" required />
+            <TextField label="Rate ($)" value={rate} onChange={setRate} placeholder="700" />
+            <TextField label="Origin" value={origin} onChange={setOrigin} placeholder="Union City, GA" required />
+            <TextField label="Destination" value={destination} onChange={setDestination} placeholder="Denver, PA" required />
+            <TextField label="Miles" value={miles} onChange={setMiles} placeholder="117" type="number" />
+            <TextField label="Weight (lbs)" value={weight} onChange={setWeight} placeholder="5250" type="number" />
+          </div>
+          <div className="mt-4">
+            <button className="btn btn-primary">Create Load</button>
+          </div>
+        </form>
+      );
+    }
+
+    function OfferRow({ offer, onAccept, onCounter }) {
+      const [counter, setCounter] = useState("");
+      return (
+        <div className="rounded-lg border border-white/10 p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="text-sm"><span className="font-semibold">{offer.driverName}</span> offered <span className="v">${offer.amount.toFixed(2)}</span> — <span className="text-white/70">{offer.message || "No note"}</span></div>
+            <div className="text-xs text-white/50">{new Date(offer.time).toLocaleString()}</div>
+          </div>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <button className="btn btn-primary" onClick={onAccept}>Accept</button>
+            <input className="input w-28" placeholder="Counter $" value={counter} onChange={e=>setCounter(e.target.value)} />
+            <button className="btn btn-ghost" onClick={()=>onCounter(+counter || 0)}>Send Counter</button>
+          </div>
+        </div>
+      );
+    }
+
+    function LoadsTable({ loads, onChange }) {
+      const [assignMap, setAssignMap] = useState({});
+      const acceptOffer = (loadId, offerIdx) => {
+        const next = loads.map(l => {
+          if(l.id !== loadId) return l;
+          const offer = l.offers[offerIdx];
+          return { ...l, status:"assigned", assignedDriver: offer.driverName, rate: offer.amount, offers: l.offers };
+        });
+        onChange(next);
+      };
+      const counterOffer = (loadId, offerIdx, amount) => {
+        const next = loads.map(l => {
+          if(l.id !== loadId) return l;
+          l.offers[offerIdx] = { ...l.offers[offerIdx], counter: amount };
+          return { ...l };
+        });
+        onChange(next);
+      };
+      const assignDriver = (loadId) => {
+        const name = assignMap[loadId];
+        if(!name) return;
+        const next = loads.map(l => l.id===loadId ? { ...l, status:"assigned", assignedDriver:name } : l);
+        onChange(next);
+        setAssignMap({ ...assignMap, [loadId]:"" });
+      };
+      return (
+        <div className="card">
+          <div className="divide-y divide-white/5">
+            {loads.map(l => (
+              <div key={l.id} className="p-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="font-semibold">{l.title}</div>
+                  <div className="flex items-center gap-2">
+                    <span className="pill">{l.origin} → {l.destination}</span>
+                    <span className="pill">{l.miles||0} mi</span>
+                    <span className="pill">{l.weight||0} lbs</span>
+                    <span className="pill">${l.rate||0}</span>
+                    <span className="pill">{l.status}</span>
+                  </div>
+                </div>
+                {l.status==="assigned" && <div className="mt-1 text-sm text-white/70">Assigned to <span className="n">{l.assignedDriver}</span></div>}
+                <div className="mt-3 grid gap-3 md:grid-cols-2">
+                  <div>
+                    <div className="text-sm text-white/60 mb-2">Assign driver</div>
+                    <div className="flex gap-2">
+                      <input className="input w-full" placeholder="Driver name" value={assignMap[l.id]||""} onChange={e=>setAssignMap({...assignMap, [l.id]: e.target.value})} />
+                      <button className="btn btn-ghost" onClick={()=>assignDriver(l.id)}>Assign</button>
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-sm text-white/60 mb-2">Offers</div>
+                    <div className="space-y-2">
+                      {l.offers.length ? l.offers.map((o, i) => (
+                        <OfferRow key={o.id} offer={o} onAccept={()=>acceptOffer(l.id,i)} onCounter={(amt)=>counterOffer(l.id,i,amt)} />
+                      )) : <div className="text-sm text-white/50">No offers yet.</div>}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    // Driver view – browse & offer
+    function BrowseLoads({ loads, driverName, onOffer, driverAccess }) {
+      const openLoads = loads.filter(l => l.status === "open");
+      const [rate, setRate] = useState({}); // loadId -> number
+      const [note, setNote] = useState({}); // loadId -> string
+
+      if (!openLoads.length) return <div className="card p-4 text-sm text-white/60">No open loads.</div>;
+
+      return (
+        <div className="card">
+          <div className="divide-y divide-white/5">
+            {openLoads.map(l => (
+              <div key={l.id} className="p-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="font-semibold">{l.title}</div>
+                  <div className="flex items-center gap-2">
+                    <span className="pill">{l.origin} → {l.destination}</span>
+                    <span className="pill">{l.miles||0} mi</span>
+                    <span className="pill">{l.weight||0} lbs</span>
+                    <span className="pill">Req: ${l.rate||0}</span>
+                  </div>
+                </div>
+                <div className="mt-3 grid gap-2 md:grid-cols-3">
+                  <input className="input" type="number" placeholder="Your rate ($)" value={rate[l.id]||""} onChange={e=>setRate({...rate,[l.id]:e.target.value})} />
+                  <input className="input" placeholder="Note (optional)" value={note[l.id]||""} onChange={e=>setNote({...note,[l.id]:e.target.value})} />
+                  <button className="btn btn-primary" onClick={()=>{
+                    const amt = +rate[l.id] || 0;
+                    if(!driverName) { alert("Enter your driver name above."); return; }
+                    onOffer(l.id, { id: uid(), driverName, amount: amt, message: (note[l.id]||"").trim(), time: nowISO() });
+                    setRate({...rate, [l.id]:""}); setNote({...note, [l.id]:""});
+                  }}>Send Offer</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    // Auth
+    function AdminGate({ admin, setAdmin }) {
+      const [input, setInput] = useState("");
+      const hasPass = !!admin.passcode;
+      const login = () => {
+        if (!hasPass) { setAdmin({ passcode: input.trim(), authed: true }); }
+        else if (input.trim() === admin.passcode) { setAdmin({ ...admin, authed: true }); }
+        else { alert("Incorrect passcode."); }
+        setInput("");
+      };
+      return (
+        <div className="card p-4">
+          <div className="text-sm text-white/60">{hasPass ? "Enter admin passcode" : "Create an admin passcode"}</div>
+          <div className="mt-2 flex gap-2">
+            <input className="input" type="password" placeholder={hasPass ? "••••••" : "Set a strong passcode"} value={input} onChange={e=>setInput(e.target.value)} />
+            <button className="btn btn-primary" onClick={login}>{hasPass ? "Unlock" : "Set & Unlock"}</button>
+          </div>
+        </div>
+      );
+    }
+
+    function App() {
+      const [loads, setLoads] = useLoads();
+      const [posts, setPosts] = useDriverPosts();
+      const [access, setAccess] = useDriverAccess();
+      const [admin, setAdmin] = useAdmin();
+      const [tab, setTab] = useState("driver");
+      const [driverName, setDriverName] = useState("");
+
+      const filteredPosts = useMemo(() => posts, [posts]);
+
+      const toggleAccess = (phone) => setAccess(prev => ({ ...prev, [phone]: prev[phone] === false ? true : false }));
+
+      const addPost = (post) => setPosts(prev => [post, ...prev].slice(0,100));
+
+      const createLoad = (l) => setLoads(prev => [l, ...prev]);
+      const addOffer = (loadId, offer) => setLoads(prev => prev.map(l => l.id===loadId ? ({...l, offers:[offer, ...l.offers]}) : l));
+
+      return (
+        <div className="min-h-full grid grid-rows-[auto,1fr,auto]">
+          <header className="border-b border-white/10 bg-black/30 backdrop-blur">
+            <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="h-9 w-9 rounded-xl bg-sky-500/20 ring-1 ring-white/10 grid place-content-center"><span className="text-sky-400 font-black">CV</span></div>
+                <h1 className="text-xl font-bold"><span className="brand-gradient">Core Versa Loadboard</span> <span className="text-white/40">— First Class</span></h1>
+              </div>
+              <nav className="flex items-center gap-2">
+                <button className={"btn "+(tab==="driver"?"btn-sky":"btn-ghost")} onClick={()=>setTab("driver")}>Driver</button>
+                <button className={"btn "+(tab==="dispatcher"?"btn-sky":"btn-ghost")} onClick={()=>setTab("dispatcher")}>Dispatcher</button>
+              </nav>
+            </div>
+          </header>
+
+          <main className="max-w-7xl mx-auto w-full px-6 py-8 grid gap-8 md:grid-cols-2">
+            {/* Left column */}
+            <div className="space-y-6">
+              {tab==="driver" ? (
+                <>
+                  <SectionTitle title="Browse Open Loads" subtitle="Submit your rate and a note to negotiate." />
+                  <div className="card p-4 mb-4">
+                    <div className="text-sm text-white/60 mb-2">Your display name</div>
+                    <input className="input w-full" value={driverName} onChange={e=>setDriverName(e.target.value)} placeholder="Type your driver name (used on offers)" />
+                  </div>
+                  <BrowseLoads loads={loads} driverName={driverName} onOffer={addOffer} driverAccess={access} />
+                </>
+              ) : (
+                <>
+                  <SectionTitle title="Your Loads" subtitle="Review, counter, accept, and assign drivers. (Admin only)" />
+                  {admin.authed ? <CreateLoadForm onCreate={createLoad} /> : <AdminGate admin={admin} setAdmin={setAdmin} />}
+                  <div className="mt-4">
+                    <LoadsTable loads={loads} onChange={setLoads} />
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Right column */}
+            <div className="space-y-6">
+              {tab==="driver" ? (
+                <>
+                  <SectionTitle title="Post Your Availability" subtitle="Share your location, equipment, phone, and when you can run." />
+                  <DriverAvailabilityForm onPost={addPost} />
+                  <div className="card p-4">
+                    <div className="text-sm text-white/60">Tips</div>
+                    <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-white/70">
+                      <li>Submit your all-in rate and add a short operational note.</li>
+                      <li>Counter-offers from dispatch will appear in the load’s offer thread.</li>
+                      <li>Payouts: Friday (no fee) or same-day Quick Pay (9%).</li>
+                    </ul>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <SectionTitle title="Driver Availability Board" subtitle="Recent posts from drivers (location, equipment, phone). Toggle access per driver." />
+                  <DriverBoard posts={filteredPosts} access={access} onToggleAccess={toggleAccess} />
+                </>
+              )}
+            </div>
+          </main>
+
+          <footer className="border-t border-white/10 bg-black/30">
+            <div className="max-w-7xl mx-auto px-6 py-6 text-xs text-white/50">
+              © <span id="year"></span> Core Versa LLC — Professional dispatch platform.
+            </div>
+          </footer>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    document.getElementById('year').textContent = new Date().getFullYear();
   </script>
 </body>
 </html>
